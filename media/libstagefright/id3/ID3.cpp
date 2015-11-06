@@ -686,9 +686,12 @@ void ID3::Iterator::findFrame() {
                 baseSize = U32_AT(&mParent.mData[mOffset + 4]);
             }
 
-            if(baseSize == 0) {
-		    return;
-	    }
+            if (baseSize == 0) {
+                /* Don't try to parse a frame with zero-sized data. Skip this
+                 * header entirely */
+                mOffset += 10; // http://id3.org/id3v2.4.0-structure section 3.1
+		continue;
+            }
 
             // Prevent integer overflow when adding
             if (SIZE_MAX - 10 <= baseSize) {
