@@ -31,6 +31,7 @@
 #include <media/AudioPolicyHelper.h>
 #include <media/AudioResamplerPublic.h>
 #include "media/AVMediaExtensions.h"
+#include <cutils/properties.h>
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -168,7 +169,8 @@ AudioTrack::AudioTrack()
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE)
+      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mPlaybackRateSet(false)
 {
     mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
     mAttributes.usage = AUDIO_USAGE_UNKNOWN;
@@ -198,7 +200,8 @@ AudioTrack::AudioTrack(
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE)
+      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mPlaybackRateSet(false)
 {
     mStatus = set(streamType, sampleRate, format, channelMask,
             frameCount, flags, cbf, user, notificationFrames,
@@ -228,7 +231,8 @@ AudioTrack::AudioTrack(
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE)
+      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mPlaybackRateSet(false)
 {
     mStatus = set(streamType, sampleRate, format, channelMask,
             0 /*frameCount*/, flags, cbf, user, notificationFrames,
@@ -524,6 +528,15 @@ status_t AudioTrack::start()
         mTimestampStartupGlitchReported = false;
         mRetrogradeMotionReported = false;
 
+        // If previousState == STATE_STOPPED, we reactivate markers (mMarkerPosition != 0)
+        // as the position is reset to 0. This is legacy behavior. This is not done
+        // in stop() to avoid a race condition where the last marker event is issued twice.
+        // Note: the if is technically unnecessary because previousState == STATE_FLUSHED
+        // is only for streaming tracks, and mMarkerReached is already set to false.
+        if (previousState == STATE_STOPPED) {
+            mMarkerReached = false;
+        }
+
         // For offloaded tracks, we don't know if the hardware counters are really zero here,
         // since the flush is asynchronous and stop may not fully drain.
         // We save the time when the track is started to later verify whether
@@ -599,9 +612,9 @@ void AudioTrack::stop()
 
     mProxy->interrupt();
     mAudioTrack->stop();
-    // the playback head position will reset to 0, so if a marker is set, we need
-    // to activate it again
-    mMarkerReached = false;
+
+    // Note: legacy handling - stop does not clear playback marker
+    // and periodic update counter, but flush does for streaming tracks.
 
     if (mSharedBuffer != 0) {
         // clear buffer position and loop count.
@@ -704,7 +717,7 @@ status_t AudioTrack::setVolume(float left, float right)
 
     mProxy->setVolumeLR(gain_minifloat_pack(gain_from_float(left), gain_from_float(right)));
 
-    if (isOffloaded_l()) {
+    if (isOffloaded_l() && mAudioTrack != NULL) {
         mAudioTrack->signal();
     }
     return NO_ERROR;
@@ -829,13 +842,13 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
     }
 
     // Check resampler ratios are within bounds
-    if (effectiveRate > mSampleRate * AUDIO_RESAMPLER_DOWN_RATIO_MAX) {
+    if ((uint64_t)effectiveRate > (uint64_t)mSampleRate * (uint64_t)AUDIO_RESAMPLER_DOWN_RATIO_MAX) {
         ALOGV("setPlaybackRate(%f, %f) failed. Resample rate exceeds max accepted value",
                 playbackRate.mSpeed, playbackRate.mPitch);
         return BAD_VALUE;
     }
 
-    if (effectiveRate * AUDIO_RESAMPLER_UP_RATIO_MAX < mSampleRate) {
+    if ((uint64_t)effectiveRate * (uint64_t)AUDIO_RESAMPLER_UP_RATIO_MAX < (uint64_t)mSampleRate) {
         ALOGV("setPlaybackRate(%f, %f) failed. Resample rate below min accepted value",
                         playbackRate.mSpeed, playbackRate.mPitch);
         return BAD_VALUE;
@@ -844,6 +857,15 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
     //set effective rates
     mProxy->setPlaybackRate(playbackRateTemp);
     mProxy->setSampleRate(effectiveRate); // FIXME: not quite "atomic" with setPlaybackRate
+
+    // fallback out of Direct PCM if setPlaybackRate is called on PCM track
+    if (property_get_bool("audio.offload.track.enable", false) &&
+        (mFormat == AUDIO_FORMAT_PCM_16_BIT) && (mOffloadInfo == NULL) &&
+        (mFlags == AUDIO_OUTPUT_FLAG_NONE)) {
+        mPlaybackRateSet = true;
+        android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+    }
+
     return NO_ERROR;
 }
 
@@ -1135,11 +1157,16 @@ status_t AudioTrack::createTrack_l()
     audio_stream_type_t streamType = mStreamType;
     audio_attributes_t *attr = (mStreamType == AUDIO_STREAM_DEFAULT) ? &mAttributes : NULL;
 
-    status_t status;
-    status = AudioSystem::getOutputForAttr(attr, &output,
+    audio_offload_info_t tOffloadInfo = AUDIO_INFO_INITIALIZER;
+    if (mPlaybackRateSet == true && mOffloadInfo == NULL && mFormat == AUDIO_FORMAT_PCM_16_BIT) {
+        mOffloadInfo = &tOffloadInfo;
+    }
+    status_t status = AudioSystem::getOutputForAttr(attr, &output,
                                            (audio_session_t)mSessionId, &streamType, mClientUid,
                                            mSampleRate, mFormat, mChannelMask,
                                            mFlags, mSelectedDeviceId, mOffloadInfo);
+    //reset offload info if forced
+    mOffloadInfo = (mOffloadInfo == &tOffloadInfo) ? NULL : mOffloadInfo;
 
     if (status != NO_ERROR || output == AUDIO_IO_HANDLE_NONE) {
         ALOGE("Could not get audio output for session %d, stream type %d, usage %d, sample rate %u, format %#x,"
@@ -2318,7 +2345,7 @@ status_t AudioTrack::getTimestamp(AudioTimestamp& timestamp)
     } else {
         // Update the mapping between local consumed (mPosition) and server consumed (mServer)
 
-        if (AVMediaUtils::get()->AudioTrackGetTimestamp(this, timestamp) == NO_ERROR) {
+        if (AVMediaUtils::get()->AudioTrackGetTimestamp(this, &timestamp) == NO_ERROR) {
             return NO_ERROR;
         }
 

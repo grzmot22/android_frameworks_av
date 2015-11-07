@@ -57,13 +57,14 @@ sp<ACodec> AVFactory::createACodec() {
 }
 
 MediaExtractor* AVFactory::createExtendedExtractor(
-         const sp<DataSource> &, const char *, const sp<AMessage> &) {
+         const sp<DataSource> &, const char *, const sp<AMessage> &,
+         const uint32_t) {
     return NULL;
 }
 
 sp<MediaExtractor> AVFactory::updateExtractor(
             sp<MediaExtractor> ext, const sp<DataSource> &,
-            const char *, const sp<AMessage> &) {
+            const char *, const sp<AMessage> &, const uint32_t) {
     return ext;
 }
 
@@ -71,7 +72,7 @@ sp<NuCachedSource2> AVFactory::createCachedSource(
             const sp<DataSource> &source,
             const char *cacheConfig,
             bool disconnectAtHighwatermark) {
-    return new NuCachedSource2(source, cacheConfig, disconnectAtHighwatermark);
+    return NuCachedSource2::Create(source, cacheConfig, disconnectAtHighwatermark);
 }
 
 MediaHTTP* AVFactory::createMediaHTTP(

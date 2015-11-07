@@ -36,6 +36,7 @@
 #include <media/AudioParameter.h>
 
 #include <stagefright/AVExtensions.h>
+#include <media/stagefright/FFMPEGSoftCodec.h>
 
 namespace android {
 
@@ -106,7 +107,7 @@ status_t convertMetaDataToMessage(
 
     int avgBitRate;
     if (meta->findInt32(kKeyBitRate, &avgBitRate)) {
-        msg->setInt32("bit-rate", avgBitRate);
+        msg->setInt32("bitrate", avgBitRate);
     }
 
     int32_t isSync;
@@ -201,8 +202,13 @@ status_t convertMetaDataToMessage(
     }
 
     int32_t fps;
-    if (meta->findInt32(kKeyFrameRate, &fps)) {
+    if (meta->findInt32(kKeyFrameRate, &fps) && fps > 0) {
         msg->setInt32("frame-rate", fps);
+    }
+
+    int32_t bitsPerSample;
+    if (meta->findInt32(kKeyBitsPerSample, &bitsPerSample)) {
+        msg->setInt32("bit-width", bitsPerSample);
     }
 
     uint32_t type;
@@ -213,8 +219,10 @@ status_t convertMetaDataToMessage(
 
         const uint8_t *ptr = (const uint8_t *)data;
 
-        CHECK(size >= 7);
-        CHECK_EQ((unsigned)ptr[0], 1u);  // configurationVersion == 1
+        if (size < 7 || ptr[0] != 1) {  // configurationVersion == 1
+            ALOGE("b/23680780");
+            return BAD_VALUE;
+        }
         uint8_t profile __unused = ptr[1];
         uint8_t level __unused = ptr[3];
 
@@ -240,7 +248,10 @@ status_t convertMetaDataToMessage(
         buffer->setRange(0, 0);
 
         for (size_t i = 0; i < numSeqParameterSets; ++i) {
-            CHECK(size >= 2);
+            if (size < 2) {
+                ALOGE("b/23680780");
+                return BAD_VALUE;
+            }
             size_t length = U16_AT(ptr);
 
             ptr += 2;
@@ -269,13 +280,19 @@ status_t convertMetaDataToMessage(
         }
         buffer->setRange(0, 0);
 
-        CHECK(size >= 1);
+        if (size < 1) {
+            ALOGE("b/23680780");
+            return BAD_VALUE;
+        }
         size_t numPictureParameterSets = *ptr;
         ++ptr;
         --size;
 
         for (size_t i = 0; i < numPictureParameterSets; ++i) {
-            CHECK(size >= 2);
+            if (size < 2) {
+                ALOGE("b/23680780");
+                return BAD_VALUE;
+            }
             size_t length = U16_AT(ptr);
 
             ptr += 2;
@@ -299,8 +316,10 @@ status_t convertMetaDataToMessage(
     } else if (meta->findData(kKeyHVCC, &type, &data, &size)) {
         const uint8_t *ptr = (const uint8_t *)data;
 
-        CHECK(size >= 7);
-        CHECK_EQ((unsigned)ptr[0], 1u);  // configurationVersion == 1
+        if (size < 23 || ptr[0] != 1) {  // configurationVersion == 1
+            ALOGE("b/23680780");
+            return BAD_VALUE;
+        }
         uint8_t profile __unused = ptr[1] & 31;
         uint8_t level __unused = ptr[12];
         ptr += 22;
@@ -319,6 +338,10 @@ status_t convertMetaDataToMessage(
         buffer->setRange(0, 0);
 
         for (i = 0; i < numofArrays; i++) {
+            if (size < 3) {
+                ALOGE("b/23680780");
+                return BAD_VALUE;
+            }
             ptr += 1;
             size -= 1;
 
@@ -329,7 +352,10 @@ status_t convertMetaDataToMessage(
             size -= 2;
 
             for (j = 0; j < numofNals; j++) {
-                CHECK(size >= 2);
+                if (size < 2) {
+                    ALOGE("b/23680780");
+                    return BAD_VALUE;
+                }
                 size_t length = U16_AT(ptr);
 
                 ptr += 2;
@@ -436,7 +462,15 @@ status_t convertMetaDataToMessage(
     }
 
     AVUtils::get()->convertMetaDataToMessage(meta, &msg);
+
+    FFMPEGSoftCodec::convertMetaDataToMessageFF(meta, &msg);
     *format = msg;
+
+#if 0
+    ALOGI("convertMetaDataToMessage from:");
+    meta->dumpToLog();
+    ALOGI("  to: %s", msg->debugString(0).c_str());
+#endif
 
     return OK;
 }
@@ -629,6 +663,11 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         if (msg->findInt32("is-adts", &isADTS)) {
             meta->setInt32(kKeyIsADTS, isADTS);
         }
+
+        int32_t bitsPerSample;
+        if (msg->findInt32("bit-width", &bitsPerSample)) {
+            meta->setInt32(kKeyBitsPerSample, bitsPerSample);
+        }
     }
 
     int32_t maxInputSize;
@@ -647,7 +686,7 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
     }
 
     int32_t fps;
-    if (msg->findInt32("frame-rate", &fps)) {
+    if (msg->findInt32("frame-rate", &fps) && fps > 0) {
         meta->setInt32(kKeyFrameRate, fps);
     }
 
@@ -680,8 +719,10 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
 
     // XXX TODO add whatever other keys there are
 
+    FFMPEGSoftCodec::convertMessageToMetaDataFF(msg, meta);
+
 #if 0
-    ALOGI("converted %s to:", msg->debugString(0).c_str());
+    ALOGI("convertMessageToMetaData from %s to:", msg->debugString(0).c_str());
     meta->dumpToLog();
 #endif
 }
@@ -829,6 +870,7 @@ bool canOffloadStream(const sp<MetaData>& meta, bool hasVideo,
     if (AVUtils::get()->canOffloadAPE(meta) != true) {
         return false;
     }
+    ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info.format);
 
     // Redefine aac format according to its profile
     // Offloading depends on audio DSP capabilities.

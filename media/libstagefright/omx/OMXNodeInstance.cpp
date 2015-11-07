@@ -206,6 +206,7 @@ OMXNodeInstance::OMXNodeInstance(
     mDebugLevelBumpPendingBuffers[1] = 0;
     mMetadataType[0] = kMetadataBufferTypeInvalid;
     mMetadataType[1] = kMetadataBufferTypeInvalid;
+    mIsSecure = AString(name).endsWith(".secure");
 }
 
 OMXNodeInstance::~OMXNodeInstance() {
@@ -1593,7 +1594,8 @@ void OMXNodeInstance::removeActiveBuffer(
 void OMXNodeInstance::freeActiveBuffers() {
     // Make sure to count down here, as freeBuffer will in turn remove
     // the active buffer from the vector...
-    for (size_t i = mActiveBuffers.size(); i--;) {
+    for (size_t i = mActiveBuffers.size(); i;) {
+        i--;
         freeBuffer(mActiveBuffers[i].mPortIndex, mActiveBuffers[i].mID);
     }
 }

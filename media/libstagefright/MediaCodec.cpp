@@ -573,6 +573,7 @@ status_t MediaCodec::stop() {
 }
 
 status_t MediaCodec::reclaim() {
+    ALOGD("MediaCodec::reclaim(%p) %s", this, mInitName.c_str());
     sp<AMessage> msg = new AMessage(kWhatRelease, this);
     msg->setInt32("reclaimed", 1);
 
@@ -1143,7 +1144,8 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
 
                     CHECK(msg->findString("componentName", &mComponentName));
 
-                    if (mComponentName.startsWith("OMX.google.")) {
+                    if (mComponentName.startsWith("OMX.google.") ||
+                            mComponentName.startsWith("OMX.ffmpeg.")) {
                         mFlags |= kFlagUsesSoftwareRenderer;
                     } else {
                         mFlags &= ~kFlagUsesSoftwareRenderer;
@@ -1158,8 +1160,10 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         resourceType = String8(kResourceNonSecureCodec);
                     }
 
-                    const char *subtype = mIsVideo ? kResourceVideoCodec : kResourceAudioCodec;
-                    addResource(resourceType, String8(subtype), 1);
+                    if (mIsVideo) {
+                        // audio codec is currently ignored.
+                        addResource(resourceType, String8(kResourceVideoCodec), 1);
+                    }
 
                     (new AMessage)->postReply(mReplyID);
                     break;

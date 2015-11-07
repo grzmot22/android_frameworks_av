@@ -68,10 +68,10 @@ struct AVFactory {
     virtual sp<ACodec> createACodec();
     virtual MediaExtractor* createExtendedExtractor(
             const sp<DataSource> &source, const char *mime,
-            const sp<AMessage> &meta);
+            const sp<AMessage> &meta, const uint32_t flags);
     virtual sp<MediaExtractor> updateExtractor(
             sp<MediaExtractor> ext, const sp<DataSource> &source,
-            const char *mime, const sp<AMessage> &meta);
+            const char *mime, const sp<AMessage> &meta, const uint32_t flags);
     virtual sp<NuCachedSource2> createCachedSource(
             const sp<DataSource> &source,
             const char *cacheConfig = NULL,
@@ -160,6 +160,9 @@ struct AVUtils {
             List<int64_t> &/*decodeTimeQueue*/) {}
 
     virtual bool useQCHWEncoder(const sp<AMessage> &, AString &) { return false; }
+
+    virtual bool canDeferRelease(const sp<MetaData> &/*meta*/) { return false; }
+    virtual void setDeferRelease(sp<MetaData> &/*meta*/) {}
 
     struct HEVCMuxer {
 

@@ -206,6 +206,7 @@ NuPlayer::NuPlayer(pid_t pid)
       mPlaybackSettings(AUDIO_PLAYBACK_RATE_DEFAULT),
       mVideoFpsHint(-1.f),
       mStarted(false),
+      mResetting(false),
       mSourceStarted(false),
       mPaused(false),
       mPausedByClient(false),
@@ -243,7 +244,7 @@ bool NuPlayer::IsHTTPLiveURL(const char *url) {
             return true;
         }
 
-        if (strstr(url,".m3u8")) {
+        if (strstr(url,"m3u8")) {
             return true;
         }
     }
@@ -1163,10 +1164,15 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
         {
             ALOGV("kWhatReset");
 
+            mResetting = true;
+
             mDeferredActions.push_back(
                     new FlushDecoderAction(
                         FLUSH_CMD_SHUTDOWN /* audio */,
                         FLUSH_CMD_SHUTDOWN /* video */));
+
+            mDeferredActions.push_back(
+                    new SimpleAction(&NuPlayer::closeAudioSink));
 
             mDeferredActions.push_back(
                     new SimpleAction(&NuPlayer::performReset));
@@ -1245,7 +1251,8 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
 }
 
 void NuPlayer::onResume() {
-    if (!mPaused) {
+    if (!mPaused || mResetting) {
+        ALOGD_IF(mResetting, "resetting, onResume discarded");
         return;
     }
     mPaused = false;
@@ -1526,7 +1533,10 @@ status_t NuPlayer::instantiateDecoder(bool audio, sp<DecoderBase> *decoder) {
     if (*decoder != NULL || (audio && mFlushingAudio == SHUT_DOWN)) {
         return OK;
     }
-
+    if (mSource == NULL) {
+        ALOGD("%s Ignore instantiate decoder after clearing source", __func__);
+        return INVALID_OPERATION;
+    }
     sp<AMessage> format = mSource->getFormat(audio);
 
     if (format == NULL) {
@@ -1599,7 +1609,8 @@ status_t NuPlayer::instantiateDecoder(bool audio, sp<DecoderBase> *decoder) {
     (*decoder)->configure(format);
 
     // allocate buffers to decrypt widevine source buffers
-    if (!audio && (mSourceFlags & Source::FLAG_SECURE)) {
+    if (!audio && ((mSourceFlags & Source::FLAG_SECURE) ||
+                   (mSourceFlags & Source::FLAG_USE_SET_BUFFERS))) {
         Vector<sp<ABuffer> > inputBufs;
         CHECK_EQ((*decoder)->getInputBuffers(&inputBufs), (status_t)OK);
 
@@ -1962,6 +1973,7 @@ void NuPlayer::performReset() {
     }
 
     mStarted = false;
+    mResetting = false;
     mSourceStarted = false;
 }
 
@@ -2222,7 +2234,7 @@ void NuPlayer::onSourceNotify(const sp<AMessage> &msg) {
             int posMs;
             int64_t timeUs, posUs;
             driver->getCurrentPosition(&posMs);
-            posUs = posMs * 1000;
+            posUs = (int64_t) posMs * 1000ll;
             CHECK(buffer->meta()->findInt64("timeUs", &timeUs));
 
             if (posUs < timeUs) {

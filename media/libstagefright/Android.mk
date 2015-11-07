@@ -69,6 +69,8 @@ LOCAL_SRC_FILES:=                         \
         WVMExtractor.cpp                  \
         XINGSeeker.cpp                    \
         avc_utils.cpp                     \
+        APE.cpp                           \
+        FFMPEGSoftCodec.cpp               \
 
 LOCAL_C_INCLUDES:= \
         $(TOP)/frameworks/av/include/media/ \
@@ -123,6 +125,28 @@ LOCAL_STATIC_LIBRARIES := \
 
 LOCAL_WHOLE_STATIC_LIBRARIES := libavextensions
 
+ifeq ($(BOARD_USE_S3D_SUPPORT), true)
+ifeq ($(BOARD_USES_HWC_SERVICES), true)
+LOCAL_CFLAGS += -DUSE_S3D_SUPPORT -DHWC_SERVICES
+LOCAL_C_INCLUDES += \
+        $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include \
+        $(TOP)/hardware/samsung_slsi/openmax/include/exynos \
+        $(TOP)/hardware/samsung_slsi/$(TARGET_BOARD_PLATFORM)-insignal/libhwcService \
+        $(TOP)/hardware/samsung_slsi/$(TARGET_BOARD_PLATFORM)-insignal/libhwc \
+        $(TOP)/hardware/samsung_slsi/$(TARGET_BOARD_PLATFORM)-insignal/include \
+        $(TOP)/hardware/samsung_slsi/$(TARGET_SOC)/libhwcmodule \
+        $(TOP)/hardware/samsung_slsi/$(TARGET_SOC)/include \
+        $(TOP)/hardware/samsung_slsi/exynos/libexynosutils \
+        $(TOP)/hardware/samsung_slsi/exynos/include
+
+LOCAL_ADDITIONAL_DEPENDENCIES := \
+        $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
+
+LOCAL_SHARED_LIBRARIES += \
+        libExynosHWCService
+endif
+endif
+
 LOCAL_SHARED_LIBRARIES += \
         libstagefright_enc_common \
         libstagefright_avc_common \
@@ -137,7 +161,22 @@ ifneq (,$(filter userdebug eng,$(TARGET_BUILD_VARIANT)))
 LOCAL_CFLAGS += -DENABLE_STAGEFRIGHT_EXPERIMENTS
 endif
 
+ifeq ($(TARGET_BOARD_PLATFORM),omap4)
+LOCAL_CFLAGS += -DBOARD_CANT_REALLOCATE_OMX_BUFFERS
+endif
+
 LOCAL_CLANG := true
+
+ifeq ($(BOARD_USE_SAMSUNG_CAMERAFORMAT_NV21), true)
+# This needs flag requires the following string constant in
+# CameraParametersExtra.h:
+#
+# const char CameraParameters::PIXEL_FORMAT_YUV420SP_NV21[] = "nv21";
+LOCAL_CFLAGS += -DUSE_SAMSUNG_CAMERAFORMAT_NV21
+endif
+
+# FFMPEG plugin
+LOCAL_C_INCLUDES += $(TOP)/external/stagefright-plugins/include
 
 LOCAL_MODULE:= libstagefright
 
