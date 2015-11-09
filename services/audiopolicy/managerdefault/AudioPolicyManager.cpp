@@ -88,6 +88,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(audio_devices_t device,
             }
             ALOGV("setDeviceConnectionState() connecting device %x", device);
 
+#ifdef LEGACY_ALSA_AUDIO
+            if (device & AUDIO_DEVICE_OUT_USB_ACCESSORY) {
+               AudioParameter param;
+               param.add(String8("usb_connected"), String8("true"));
+               mpClientInterface->setParameters(0, param.toString());
+            }
+#endif
+
             // register new device as available
             index = mAvailableOutputDevices.add(devDesc);
             if (index >= 0) {
@@ -138,6 +146,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(audio_devices_t device,
 
             // remove device from available output devices
             mAvailableOutputDevices.remove(devDesc);
+
+#ifdef LEGACY_ALSA_AUDIO
+            if (device & AUDIO_DEVICE_OUT_USB_ACCESSORY) {
+               AudioParameter param;
+               param.add(String8("usb_connected"), String8("true"));
+               mpClientInterface->setParameters(0, param.toString());
+            }
+#endif
 
             checkOutputsForDevice(devDesc, state, outputs, devDesc->mAddress);
 
@@ -305,7 +321,11 @@ void AudioPolicyManager::updateCallRouting(audio_devices_t rxDevice, int delayMs
     if(!hasPrimaryOutput()) {
         return;
     }
+#ifdef LEGACY_ALSA_AUDIO
+    audio_devices_t txDevice = getDeviceAndMixForInputSource(AUDIO_SOURCE_VOICE_CALL);
+#else
     audio_devices_t txDevice = getDeviceAndMixForInputSource(AUDIO_SOURCE_VOICE_COMMUNICATION);
+#endif
     ALOGV("updateCallRouting device rxDevice %08x txDevice %08x", rxDevice, txDevice);
 
     // release existing RX patch if any
@@ -1370,6 +1390,22 @@ status_t AudioPolicyManager::getInputForAttr(const audio_attributes_t *attr,
         } else {
             *inputType = API_INPUT_LEGACY;
         }
+#ifdef LEGACY_ALSA_AUDIO
+        // adapt channel selection to input source
+        switch (inputSource) {
+        case AUDIO_SOURCE_VOICE_UPLINK:
+            channelMask |= AUDIO_CHANNEL_IN_VOICE_UPLINK;
+            break;
+        case AUDIO_SOURCE_VOICE_DOWNLINK:
+            channelMask |= AUDIO_CHANNEL_IN_VOICE_DNLINK;
+            break;
+        case AUDIO_SOURCE_VOICE_CALL:
+            channelMask |= AUDIO_CHANNEL_IN_VOICE_UPLINK | AUDIO_CHANNEL_IN_VOICE_DNLINK;
+            break;
+        default:
+            break;
+        }
+#endif
         if (inputSource == AUDIO_SOURCE_HOTWORD) {
             ssize_t index = mSoundTriggerSessions.indexOfKey(session);
             if (index >= 0) {
