@@ -208,7 +208,7 @@ status_t convertMetaDataToMessage(
 
     int32_t bitsPerSample;
     if (meta->findInt32(kKeyBitsPerSample, &bitsPerSample)) {
-        msg->setInt32("bit-width", bitsPerSample);
+        msg->setInt32("bits-per-sample", bitsPerSample);
     }
 
     uint32_t type;
@@ -316,7 +316,7 @@ status_t convertMetaDataToMessage(
     } else if (meta->findData(kKeyHVCC, &type, &data, &size)) {
         const uint8_t *ptr = (const uint8_t *)data;
 
-        if (size < 23 || ptr[0] != 1) {  // configurationVersion == 1
+        if (size < 23) {  // configurationVersion == 1
             ALOGE("b/23680780");
             return BAD_VALUE;
         }
@@ -665,7 +665,7 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         }
 
         int32_t bitsPerSample;
-        if (msg->findInt32("bit-width", &bitsPerSample)) {
+        if (msg->findInt32("bits-per-sample", &bitsPerSample)) {
             meta->setInt32(kKeyBitsPerSample, bitsPerSample);
         }
     }
@@ -1042,6 +1042,19 @@ void readFromAMessage(
     CHECK(msg->findFloat("tolerance", &settings.mTolerance));
     CHECK(msg->findFloat("video-fps", videoFps));
     *sync = settings;
+}
+
+audio_format_t getPCMFormat(const sp<AMessage> &format) {
+    int32_t bits = 16;
+    if (format->findInt32("bits-per-sample", &bits)) {
+        if (bits == 8)
+            return AUDIO_FORMAT_PCM_8_BIT;
+        if (bits == 24)
+            return AUDIO_FORMAT_PCM_32_BIT;
+        if (bits == 32)
+            return AUDIO_FORMAT_PCM_FLOAT;
+    }
+    return AUDIO_FORMAT_PCM_16_BIT;
 }
 
 }  // namespace android

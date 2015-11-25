@@ -1707,7 +1707,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
     }
 
     int32_t bitWidth = 16;
-    format->findInt32("bit-width", &bitWidth);
+    format->findInt32("bits-per-sample", &bitWidth);
 
     int32_t sampleRate;
     CHECK(format->findInt32("sample-rate", &sampleRate));
@@ -1827,7 +1827,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
         const PcmInfo info = {
                 (audio_channel_mask_t)channelMask,
                 (audio_output_flags_t)pcmFlags,
-                AVNuUtils::get()->getPCMFormat(format),
+                getPCMFormat(format),
                 numChannels,
                 sampleRate
         };
@@ -1862,7 +1862,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
                     sampleRate,
                     numChannels,
                     (audio_channel_mask_t)channelMask,
-                    AVNuUtils::get()->getPCMFormat(format),
+                    getPCMFormat(format),
                     0 /* bufferCount - unused */,
                     mUseAudioCallback ? &NuPlayer::Renderer::AudioSinkCallback : NULL,
                     mUseAudioCallback ? this : NULL,

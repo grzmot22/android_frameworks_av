@@ -45,6 +45,7 @@
 #include <media/stagefright/PersistentSurface.h>
 #include <media/stagefright/SurfaceUtils.h>
 #include <media/stagefright/FFMPEGSoftCodec.h>
+#include <media/stagefright/Utils.h>
 
 #include <media/hardware/HardwareAPI.h>
 
@@ -543,12 +544,7 @@ ACodec::ACodec()
 ACodec::~ACodec() {
 }
 
-status_t ACodec::setupCustomCodec(status_t err, const char *mime, const sp<AMessage> &msg) {
-     if (!strncmp(mComponentName.c_str(), "OMX.ffmpeg.", 11) && !mIsEncoder) {
-         return FFMPEGSoftCodec::setAudioFormat(
-               msg, mime, mOMX, mNode);
-     }
-
+status_t ACodec::setupCustomCodec(status_t err, const char * /*mime*/, const sp<AMessage> &/*msg*/) {
     return err;
 }
 
@@ -2019,8 +2015,8 @@ status_t ACodec::configureCodec(
             err = OK;
         } else {
             int32_t bitsPerSample = 16;
-            msg->findInt32("bit-width", &bitsPerSample);
-            err = setupRawAudioFormat(
+            msg->findInt32("bits-per-sample", &bitsPerSample);
+            err = setupRawAudioFormatInternal(
                     encoder ? kPortIndexInput : kPortIndexOutput,
                     sampleRate,
                     numChannels, bitsPerSample);
@@ -2098,11 +2094,7 @@ status_t ACodec::configureCodec(
             }
             err = setupG711Codec(encoder, sampleRate, numChannels);
         }
-#ifdef QTI_FLAC_DECODER
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC) && encoder) {
-#else
-    } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC)) {
-#endif
         int32_t numChannels = 0, sampleRate = 0, compressionLevel = -1;
         if (encoder &&
                 (!msg->findInt32("channel-count", &numChannels)
@@ -2139,8 +2131,8 @@ status_t ACodec::configureCodec(
             err = INVALID_OPERATION;
         } else {
             int32_t bitsPerSample = 16;
-            msg->findInt32("bit-width", &bitsPerSample);
-            err = setupRawAudioFormat(kPortIndexInput, sampleRate, numChannels, bitsPerSample);
+            msg->findInt32("bits-per-sample", &bitsPerSample);
+            err = setupRawAudioFormatInternal(kPortIndexInput, sampleRate, numChannels, bitsPerSample);
         }
     } else if (!strncmp(mComponentName.c_str(), "OMX.google.", 11)
             && !strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AC3)) {
@@ -2151,7 +2143,7 @@ status_t ACodec::configureCodec(
             err = INVALID_OPERATION;
         } else {
             int32_t bitsPerSample = 16;
-            msg->findInt32("bit-width", &bitsPerSample);
+            msg->findInt32("bits-per-sample", &bitsPerSample);
             err = setupAC3Codec(encoder, numChannels, sampleRate, bitsPerSample);
         }
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_EAC3)) {
@@ -2162,11 +2154,16 @@ status_t ACodec::configureCodec(
             err = INVALID_OPERATION;
         } else {
             int32_t bitsPerSample = 16;
-            msg->findInt32("bit-width", &bitsPerSample);
+            msg->findInt32("bits-per-sample", &bitsPerSample);
             err = setupEAC3Codec(encoder, numChannels, sampleRate, bitsPerSample);
         }
     } else {
-        err = setupCustomCodec(err, mime, msg);
+        if (!strncmp(mComponentName.c_str(), "OMX.ffmpeg.", 11) && !mIsEncoder) {
+            err = FFMPEGSoftCodec::setAudioFormat(
+                  msg, mime, mOMX, mNode);
+        } else {
+            err = setupCustomCodec(err, mime, msg);
+        }
     }
 
     if (err != OK) {
@@ -2481,7 +2478,7 @@ status_t ACodec::setupAACCodec(
 
 status_t ACodec::setupAC3Codec(
         bool encoder, int32_t numChannels, int32_t sampleRate, int32_t bitsPerSample) {
-    status_t err = setupRawAudioFormat(
+    status_t err = setupRawAudioFormatInternal(
             encoder ? kPortIndexInput : kPortIndexOutput, sampleRate, numChannels, bitsPerSample);
 
     if (err != OK) {
@@ -2519,7 +2516,7 @@ status_t ACodec::setupAC3Codec(
 
 status_t ACodec::setupEAC3Codec(
         bool encoder, int32_t numChannels, int32_t sampleRate, int32_t bitsPerSample) {
-    status_t err = setupRawAudioFormat(
+    status_t err = setupRawAudioFormatInternal(
             encoder ? kPortIndexInput : kPortIndexOutput, sampleRate, numChannels, bitsPerSample);
 
     if (err != OK) {
@@ -2666,6 +2663,11 @@ status_t ACodec::setupFlacCodec(
 }
 
 status_t ACodec::setupRawAudioFormat(
+        OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels) {
+    return setupRawAudioFormatInternal(portIndex, sampleRate, numChannels, 16);
+}
+
+status_t ACodec::setupRawAudioFormatInternal(
         OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels, int32_t bitsPerSample) {
     OMX_PARAM_PORTDEFINITIONTYPE def;
     InitOMXParams(&def);
@@ -4272,7 +4274,8 @@ status_t ACodec::getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify) {
                     notify->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
                     notify->setInt32("channel-count", params.nChannels);
                     notify->setInt32("sample-rate", params.nSamplingRate);
-                    notify->setInt32("bit-width", params.nBitPerSample);
+                    notify->setInt32("bits-per-sample", params.nBitPerSample);
+                    notify->setInt32("pcm-format", getPCMFormat(notify));
 
                     if (mChannelMaskPresent) {
                         notify->setInt32("channel-mask", mChannelMask);
@@ -5783,6 +5786,7 @@ bool ACodec::LoadedState::onConfigureComponent(
 
     status_t err = OK;
     AString mime;
+
     if (!msg->findString("mime", &mime)) {
         err = BAD_VALUE;
     } else {
