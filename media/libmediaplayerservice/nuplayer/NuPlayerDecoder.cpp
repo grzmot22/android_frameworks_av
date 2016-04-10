@@ -672,7 +672,6 @@ void NuPlayer::Decoder::handleOutputFormatChange(const sp<AMessage> &format) {
         } else {
             flags = AUDIO_OUTPUT_FLAG_NONE;
         }
-
         status_t err = mRenderer->openAudioSink(
                 format, false /* offloadOnly */, hasVideo, flags, NULL /* isOffloaed */, mSource->isStreaming());
         if (err != OK) {

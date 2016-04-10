@@ -3978,7 +3978,11 @@ bool ACodec::describeDefaultColorFormat(DescribeColorFormatParams &params) {
         fmt != OMX_COLOR_FormatYUV420SemiPlanar &&
         fmt != OMX_COLOR_FormatYUV420PackedSemiPlanar &&
         fmt != OMX_TI_COLOR_FormatYUV420PackedSemiPlanar &&
+<<<<<<< HEAD
         fmt != HAL_PIXEL_FORMAT_YV12) {
+=======
+        fmt != (OMX_COLOR_FORMATTYPE)HAL_PIXEL_FORMAT_YV12) {
+>>>>>>> 948fd3719f721c1a21b906905c276bed30d49d5d
         ALOGW("do not know color format 0x%x = %d", fmt, fmt);
         return false;
     }
@@ -6654,6 +6658,9 @@ bool ACodec::ExecutingState::onOMXEvent(
                     sp<AMessage> dummy = new AMessage(kWhatOutputBufferDrained, mCodec);
                     mCodec->sendFormatChange(dummy);
                 }
+            } else if (data2 == OMX_IndexParamAudioPcm) {
+                //audio parameters has changed
+                mCodec->mSentFormat = false;
             } else {
                 ALOGV("[%s] OMX_EventPortSettingsChanged 0x%08x",
                      mCodec->mComponentName.c_str(), data2);
